@@ -37,6 +37,9 @@ ZEND_DECLARE_MODULE_GLOBALS(yajl)
 /* True global resources - no need for thread safety here */
 static int le_yajl;
 
+#define PHP_JSON_OUTPUT_ARRAY 0
+#define PHP_JSON_OUTPUT_OBJECT 1
+
 static void php_yajl_generate(yajl_gen gen, zval *val);
 
 PHP_FUNCTION(yajl_version);
@@ -191,14 +194,60 @@ PHP_FUNCTION(yajl_version)
 	php_printf("yajl version: %d\n", yajl_version());
 }
 
+static int json_determine_array_type(zval **val TSRMLS_DC) /* {{{ */
+{
+	int i;
+	HashTable *myht = HASH_OF(*val);
+
+	i = myht ? zend_hash_num_elements(myht) : 0;
+	if (i > 0) {
+		char *key;
+		ulong index, idx;
+		uint key_len;
+		HashPosition pos;
+
+		zend_hash_internal_pointer_reset_ex(myht, &pos);
+		idx = 0;
+		for (;; zend_hash_move_forward_ex(myht, &pos)) {
+			i = zend_hash_get_current_key_ex(myht, &key, &key_len, &index, 0, &pos);
+			if (i == HASH_KEY_NON_EXISTANT) {
+				break;
+			}
+
+			if (i == HASH_KEY_IS_STRING) {
+				return 1;
+			} else {
+				if (index != idx) {
+					return 1;
+				}
+			}
+			idx++;
+		}
+	}
+
+	return PHP_JSON_OUTPUT_ARRAY;
+}
+/* }}} */
+
 static void php_yajl_generate_array(yajl_gen gen, zval *val)
 {
-	yajl_gen_array_open(gen);
-
 	HashTable *hash_table;
-	int i;
+	int i, r;
 
-	hash_table = HASH_OF(val);
+	if (Z_TYPE_P(val) == IS_ARRAY)
+	{
+		hash_table = HASH_OF(val);
+		r = json_determine_array_type(&val TSRMLS_CC);
+		if (r == PHP_JSON_OUTPUT_ARRAY){
+			yajl_gen_array_open(gen);
+		}else {
+			yajl_gen_map_open(gen);
+		}
+	}else {
+		hash_table = Z_OBJPROP_P(val);
+		r = PHP_JSON_OUTPUT_OBJECT;
+		yajl_gen_map_open(gen);
+	}
 
 	if (hash_table && hash_table->nApplyCount > 1) {
 		php_error_docref(NULL TSRMLS_CC, E_WARNING, "recursion detected");
@@ -231,18 +280,29 @@ static void php_yajl_generate_array(yajl_gen gen, zval *val)
 					tmp_ht->nApplyCount++;
 				}
 
-				if (i == HASH_KEY_IS_STRING){
-					yajl_gen_string(gen, key, key_len-1);
-				}else {
-					yajl_gen_integer(gen, i);
+				if (r == PHP_JSON_OUTPUT_ARRAY){
+					php_yajl_generate(gen, *data);
+				}else if (r == PHP_JSON_OUTPUT_OBJECT){
+					if (i == HASH_KEY_IS_STRING){
+						yajl_gen_string(gen, key, key_len-1);
+					}else {
+						
+					}
+					php_yajl_generate(gen, *data);
 				}
 
-				php_yajl_generate(gen, *data);
+				if (tmp_ht) {
+					tmp_ht->nApplyCount--;
+				}
 			}
 		}
 	}
 
-	yajl_gen_array_close(gen);
+	if (r == PHP_JSON_OUTPUT_ARRAY){
+		yajl_gen_array_close(gen);
+	}else {
+		yajl_gen_map_close(gen);
+	}
 
 }
 
@@ -275,6 +335,7 @@ static void php_yajl_generate(yajl_gen gen, zval *val)
 			break;
 
 		case IS_ARRAY:
+		case IS_OBJECT:
 			php_yajl_generate_array(gen, val);
 			break;
 
@@ -300,19 +361,6 @@ PHP_FUNCTION(yajl_generate)
 
 	gen = yajl_gen_alloc(NULL);
 	yajl_gen_config(gen, yajl_gen_beautify, 1);
-
-	/*unsigned char *key = "key";
-	unsigned char *value = "value";
-	int key_len = strlen(key);
-	int value_len = strlen(value);
-
-	yajl_gen_array_open(gen);
-
-	yajl_gen_string(gen, (const unsigned char*)key, key_len);
-	yajl_gen_string(gen, (const unsigned char*)value, value_len);
-
-	yajl_gen_array_close(gen);
-	*/
 	
 	php_yajl_generate(gen, param);
 
