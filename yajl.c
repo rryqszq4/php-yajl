@@ -29,6 +29,7 @@
 #include "php_yajl.h"
 #include "yajl/api/yajl_version.h"
 #include "yajl/api/yajl_gen.h"
+#include "yajl/api/yajl_parse.h"
 
 /* If you declare any globals in php_yajl.h uncomment this:
 ZEND_DECLARE_MODULE_GLOBALS(yajl)
@@ -39,6 +40,27 @@ static int le_yajl;
 
 #define PHP_JSON_OUTPUT_ARRAY 0
 #define PHP_JSON_OUTPUT_OBJECT 1
+
+#define STATUS_CONTINUE 1
+#define STATUS_ABORT    0
+
+struct stack_elem_s;
+typedef struct stack_elem_s stack_elem_t;
+struct stack_elem_s
+{
+    char * key;
+    zval *value;
+    stack_elem_t *next;
+};
+
+struct context_s
+{
+    stack_elem_t *stack;
+    zval *root;
+    char *errbuf;
+    size_t errbuf_size;
+};
+typedef struct context_s context_t;
 
 static void php_yajl_generate(yajl_gen gen, zval *val);
 
@@ -58,6 +80,7 @@ const zend_function_entry yajl_functions[] = {
 	PHP_FE(confirm_yajl_compiled,	NULL)		/* For testing, remove later. */
 	PHP_FE(yajl_version, NULL)
 	PHP_FE(yajl_generate, arginfo_yajl_generate)
+	PHP_FE(yajl_parse, NULL)
 	PHP_FE_END	/* Must be the last line in yajl_functions[] */
 };
 /* }}} */
@@ -265,6 +288,7 @@ static void php_yajl_generate_array(yajl_gen gen, zval *val)
 		uint key_len;
 		zval **data;
 		HashTable *tmp_ht;
+		char key_index[10];
 
 		zend_hash_internal_pointer_reset_ex(hash_table, &pos);
 		for (;; zend_hash_move_forward_ex(hash_table, &pos))
@@ -286,7 +310,8 @@ static void php_yajl_generate_array(yajl_gen gen, zval *val)
 					if (i == HASH_KEY_IS_STRING){
 						yajl_gen_string(gen, key, key_len-1);
 					}else {
-						
+						sprintf(key_index, "%d", index);
+						yajl_gen_string(gen, key_index, strlen(key_index));
 					}
 					php_yajl_generate(gen, *data);
 				}
@@ -348,6 +373,293 @@ static void php_yajl_generate(yajl_gen gen, zval *val)
 	return ;
 }
 
+static int object_add_keyval(context_t *ctx,
+                             zval *obj, char *key, zval *value)
+{
+
+    /* We're checking for NULL in "context_add_value" or its callers. */
+    assert (ctx != NULL);
+    assert (obj != NULL);
+    assert (key != NULL);
+    assert (value != NULL);
+
+    /* We're assuring that "obj" is an object in "context_add_value". */
+    assert(Z_TYPE_P(obj) == IS_OBJECT);
+
+    add_assoc_zval(obj, key, value);
+    zval_ptr_dtor(&value);
+
+    return (0);
+}
+
+static int array_add_value (context_t *ctx,
+                            zval *array, zval *value)
+{
+
+    /* We're checking for NULL pointers in "context_add_value" or its
+     * callers. */
+    assert (ctx != NULL);
+    assert (array != NULL);
+    assert (value != NULL);
+
+    /* "context_add_value" will only call us with array values. */
+    assert(YAJL_IS_ARRAY(array));
+
+	add_next_index_zval(array, value);
+
+    return 0;
+}
+
+static int context_push(context_t *ctx, zval *v)
+{
+    stack_elem_t *stack;
+
+    stack = malloc (sizeof (*stack));
+    if (stack == NULL)
+        RETURN_ERROR (ctx, ENOMEM, "Out of memory");
+    memset (stack, 0, sizeof (*stack));
+
+    assert ((ctx->stack == NULL)
+            || Z_TYPE_P(v) == IS_OBJECT
+            || Z_TYPE_P(v) == IS_ARRAY);
+
+    stack->value = v;
+    stack->next = ctx->stack;
+    ctx->stack = stack;
+
+    return (0);
+}
+
+static zval* context_pop(context_t *ctx)
+{
+    stack_elem_t *stack;
+    zval *v;
+
+    if (ctx->stack == NULL)
+        RETURN_ERROR (ctx, NULL, "context_pop: "
+                      "Bottom of stack reached prematurely");
+
+    stack = ctx->stack;
+    ctx->stack = stack->next;
+
+    v = stack->value;
+
+    free (stack);
+
+    return (v);
+}
+
+static int context_add_value (context_t *ctx, zval *v)
+{
+    assert (ctx != NULL);
+    assert (v != NULL);
+
+    if (ctx->stack == NULL)
+    {
+        assert (ctx->root == NULL);
+        ctx->root = v;
+        return (0);
+    }
+    else if (Z_TYPE_P(ctx->stack->value) == IS_OBJECT)
+    {
+        if (ctx->stack->key == NULL)
+        {
+            if (Z_TYPE_P(v) != IS_STRING)
+                RETURN_ERROR (ctx, EINVAL, "context_add_value: "
+                              "Object key is not a string (%#04x)",
+                              Z_TYPE_P(v));
+
+            ctx->stack->key = Z_STRVAL_P(v);
+           	zval_ptr_dtor(&v);
+            return (0);
+        }
+        else /* if (ctx->key != NULL) */
+        {
+            char * key;
+
+            key = ctx->stack->key;
+            ctx->stack->key = NULL;
+            return (object_add_keyval (ctx, ctx->stack->value, key, v));
+        }
+    }
+    else if (Z_TYPE_P(ctx->stack->value) == IS_ARRAY)
+    {
+        return (array_add_value (ctx, ctx->stack->value, v));
+    }
+    else
+    {
+        RETURN_ERROR (ctx, EINVAL, "context_add_value: Cannot add value to "
+                      "a value of type %#04x (not a composite type)",
+                      Z_TYPE_P(ctx->stack->value));
+    }
+}
+
+static int handle_string (void *ctx,
+                          const unsigned char *string, size_t string_length)
+{
+    zval *v;
+    ALLOC_INIT_ZVAL(v);
+
+    ZVAL_STRINGL(v, string, string_length, 1);
+
+    return ((context_add_value (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+static int handle_number (void *ctx, const char *string, size_t string_length)
+{
+    zval *v;
+    ALLOC_INIT_ZVAL(v);
+
+    ZVAL_STRINGL(v, string, string_length, 1);
+
+    return ((context_add_value(ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+static int handle_start_map (void *ctx)
+{
+    zval *v;
+    ALLOC_INIT_ZVAL(v);
+
+    array_init(v);
+
+    return ((context_push (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+static int handle_end_map (void *ctx)
+{
+	zval *v;
+
+    v = context_pop (ctx);
+    if (v == NULL)
+        return (STATUS_ABORT);
+    
+    return ((context_add_value (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+static int handle_start_array (void *ctx)
+{
+    zval *v;
+    ALLOC_INIT_ZVAL(v);
+
+    object_init(v);
+
+    return ((context_push (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+static int handle_end_array (void *ctx)
+{
+	zval *v;
+
+    v = context_pop (ctx);
+    if (v == NULL)
+        return (STATUS_ABORT);
+
+    return ((context_add_value (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+static int handle_boolean (void *ctx, int boolean_value)
+{
+    zval *v;
+    ALLOC_INIT_ZVAL(v);
+
+    ZVAL_BOOL(v, boolean_value);
+
+    return ((context_add_value (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+static int handle_null (void *ctx)
+{
+    zval *v;
+    ALLOC_INIT_ZVAL(v);
+
+    ZVAL_NULL(v);
+
+    return ((context_add_value (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+
+zval* yajl_zval_parse (const char *input,
+                          char *error_buffer, size_t error_buffer_size)
+{
+    static const yajl_callbacks callbacks =
+        {
+            /* null        = */ handle_null,
+            /* boolean     = */ handle_boolean,
+            /* integer     = */ NULL,
+            /* double      = */ NULL,
+            /* number      = */ handle_number,
+            /* string      = */ handle_string,
+            /* start map   = */ handle_start_map,
+            /* map key     = */ handle_string,
+            /* end map     = */ handle_end_map,
+            /* start array = */ handle_start_array,
+            /* end array   = */ handle_end_array
+        };
+
+    yajl_handle handle;
+    yajl_status status;
+    char * internal_err_str;
+	context_t ctx = { NULL, NULL, NULL, 0 };
+
+	ctx.errbuf = error_buffer;
+	ctx.errbuf_size = error_buffer_size;
+
+    if (error_buffer != NULL)
+        memset (error_buffer, 0, error_buffer_size);
+
+    handle = yajl_alloc (&callbacks, NULL, &ctx);
+    yajl_config(handle, yajl_allow_comments, 1);
+
+    status = yajl_parse(handle,
+                        (unsigned char *) input,
+                        strlen (input));
+    status = yajl_complete_parse (handle);
+    if (status != yajl_status_ok) {
+        if (error_buffer != NULL && error_buffer_size > 0) {
+               internal_err_str = (char *) yajl_get_error(handle, 1,
+                     (const unsigned char *) input,
+                     strlen(input));
+             snprintf(error_buffer, error_buffer_size, "%s", internal_err_str);
+             //YA_FREE(&(handle->alloc), internal_err_str);
+        }
+        yajl_free (handle);
+        return NULL;
+    }
+
+    yajl_free (handle);
+    return (ctx.root);
+}
+
+/*yajl_val yajl_tree_get(yajl_val n, const char ** path, yajl_type type)
+{
+    if (!path) return NULL;
+    while (n && *path) {
+        size_t i;
+        size_t len;
+
+        if (n->type != yajl_t_object) return NULL;
+        len = n->u.object.len;
+        for (i = 0; i < len; i++) {
+            if (!strcmp(*path, n->u.object.keys[i])) {
+                n = n->u.object.values[i];
+                break;
+            }
+        }
+        if (i == len) return NULL;
+        path++;
+    }
+    if (n && type != yajl_t_any && type != n->type) n = NULL;
+    return n;
+}*/
+
+void yajl_zval_free (zval *v)
+{
+    if (v == NULL) return;
+
+    zval_ptr_dtor(&v);
+}
+
+
 PHP_FUNCTION(yajl_generate)
 {
 	zval *param;
@@ -372,6 +684,26 @@ PHP_FUNCTION(yajl_generate)
 
 	smart_str_free(&buf);
 
+}
+
+PHP_FUNCTION(yajl_parse)
+{
+	char *str;
+	int str_len;
+	zval *node;
+	char errbuf[1024];
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &str, &str_len) == FAILURE)
+	{
+		return ;
+	}
+
+	node = yajl_zval_parse((const char *)str, errbuf, sizeof(errbuf));
+
+	//php_printf("%d\n", Z_TYPE_P(node) == IS_ARRAY);
+	RETVAL_ZVAL(node, 1, 0);
+
+	yajl_zval_free(node);
 }
 
 
