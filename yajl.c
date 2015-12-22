@@ -48,9 +48,10 @@ struct stack_elem_s;
 typedef struct stack_elem_s stack_elem_t;
 struct stack_elem_s
 {
-    char * key;
+    zval *key;
     zval *value;
     stack_elem_t *next;
+    int type; // 0: map;   1: array
 };
 
 struct context_s
@@ -374,7 +375,7 @@ static void php_yajl_generate(yajl_gen gen, zval *val)
 }
 
 static int object_add_keyval(context_t *ctx,
-                             zval *obj, char *key, zval *value)
+                             zval *obj, zval *key, zval *value)
 {
 
     /* We're checking for NULL in "context_add_value" or its callers. */
@@ -386,8 +387,7 @@ static int object_add_keyval(context_t *ctx,
     /* We're assuring that "obj" is an object in "context_add_value". */
     assert(Z_TYPE_P(obj) == IS_OBJECT);
 
-    add_assoc_zval(obj, key, value);
-    zval_ptr_dtor(&value);
+    add_assoc_zval(obj, Z_STRVAL_P(key), value);
 
     return (0);
 }
@@ -410,7 +410,7 @@ static int array_add_value (context_t *ctx,
     return 0;
 }
 
-static int context_push(context_t *ctx, zval *v)
+static int context_push(context_t *ctx, zval *v, int type)
 {
     stack_elem_t *stack;
 
@@ -423,6 +423,8 @@ static int context_push(context_t *ctx, zval *v)
             || Z_TYPE_P(v) == IS_OBJECT
             || Z_TYPE_P(v) == IS_ARRAY);
 
+    stack->type = type;
+    stack->key = NULL;
     stack->value = v;
     stack->next = ctx->stack;
     ctx->stack = stack;
@@ -460,32 +462,37 @@ static int context_add_value (context_t *ctx, zval *v)
         ctx->root = v;
         return (0);
     }
-    else if (Z_TYPE_P(ctx->stack->value) == IS_OBJECT)
-    {
-        if (ctx->stack->key == NULL)
-        {
-            if (Z_TYPE_P(v) != IS_STRING)
-                RETURN_ERROR (ctx, EINVAL, "context_add_value: "
-                              "Object key is not a string (%#04x)",
-                              Z_TYPE_P(v));
-
-            ctx->stack->key = Z_STRVAL_P(v);
-           	zval_ptr_dtor(&v);
-            return (0);
-        }
-        else /* if (ctx->key != NULL) */
-        {
-            char * key;
-
-            key = ctx->stack->key;
-            ctx->stack->key = NULL;
-            return (object_add_keyval (ctx, ctx->stack->value, key, v));
-        }
-    }
     else if (Z_TYPE_P(ctx->stack->value) == IS_ARRAY)
     {
-        return (array_add_value (ctx, ctx->stack->value, v));
+        if (ctx->stack->type == 0){
+            if (ctx->stack->key == NULL)
+            {
+                if (Z_TYPE_P(v) != IS_STRING)
+                    RETURN_ERROR (ctx, EINVAL, "context_add_value: "
+                                  "Object key is not a string (%#04x)",
+                                  Z_TYPE_P(v));
+
+                ctx->stack->key = v;
+
+                return (0);
+            }
+            else /* if (ctx->key != NULL) */
+            {
+                zval * key;
+
+                key = ctx->stack->key;
+                ctx->stack->key = NULL;
+                return (object_add_keyval (ctx, ctx->stack->value, key, v));
+            }
+        }else if (ctx->stack->type == 1){
+            return (array_add_value (ctx, ctx->stack->value, v));
+        }
     }
+    /*else if (Z_TYPE_P(ctx->stack->value) == IS_ARRAY)
+    {
+
+        return (array_add_value (ctx, ctx->stack->value, v));
+    }*/
     else
     {
         RETURN_ERROR (ctx, EINVAL, "context_add_value: Cannot add value to "
@@ -517,12 +524,13 @@ static int handle_number (void *ctx, const char *string, size_t string_length)
 
 static int handle_start_map (void *ctx)
 {
+    int type = 0;
     zval *v;
     ALLOC_INIT_ZVAL(v);
 
     array_init(v);
 
-    return ((context_push (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+    return ((context_push (ctx, v, type) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
 }
 
 static int handle_end_map (void *ctx)
@@ -538,12 +546,13 @@ static int handle_end_map (void *ctx)
 
 static int handle_start_array (void *ctx)
 {
+    int type = 1;
     zval *v;
     ALLOC_INIT_ZVAL(v);
 
-    object_init(v);
+    array_init(v);
 
-    return ((context_push (ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+    return ((context_push (ctx, v, type) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
 }
 
 static int handle_end_array (void *ctx)
@@ -599,7 +608,7 @@ zval* yajl_zval_parse (const char *input,
     yajl_handle handle;
     yajl_status status;
     char * internal_err_str;
-	context_t ctx = { NULL, NULL, NULL, 0 };
+	context_t ctx = { NULL, NULL, NULL, 0};
 
 	ctx.errbuf = error_buffer;
 	ctx.errbuf_size = error_buffer_size;
