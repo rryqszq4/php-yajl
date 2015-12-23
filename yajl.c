@@ -25,7 +25,7 @@
 #include "php.h"
 #include "php_ini.h"
 #include "ext/standard/info.h"
-  
+
 #include "php_yajl.h"
 #include "yajl/api/yajl_version.h"
 #include "yajl/api/yajl_gen.h"
@@ -82,7 +82,7 @@ ZEND_END_ARG_INFO()
  * Every user visible function must have an entry in yajl_functions[].
  */
 const zend_function_entry yajl_functions[] = {
-	PHP_FE(confirm_yajl_compiled,	NULL)		/* For testing, remove later. */
+	//PHP_FE(confirm_yajl_compiled,	NULL)		/* For testing, remove later. */
 	PHP_FE(yajl_version, NULL)
 	PHP_FE(yajl_generate, arginfo_yajl_generate)
 	PHP_FE(yajl_parse, arginfo_yajl_parse)
@@ -219,7 +219,8 @@ PHP_FUNCTION(confirm_yajl_compiled)
 
 PHP_FUNCTION(yajl_version)
 {
-	php_printf("yajl version: %d\n", yajl_version());
+    ZVAL_LONG(return_value, yajl_version());
+    return ;
 }
 
 static int json_determine_array_type(zval **val TSRMLS_DC) /* {{{ */
@@ -257,7 +258,7 @@ static int json_determine_array_type(zval **val TSRMLS_DC) /* {{{ */
 }
 /* }}} */
 
-static void php_yajl_generate_array(yajl_gen gen, zval *val)
+static void php_yajl_generate_array(yajl_gen gen, zval *val TSRMLS_DC)
 {
 	HashTable *hash_table;
 	int i, r;
@@ -336,7 +337,7 @@ static void php_yajl_generate_array(yajl_gen gen, zval *val)
 
 }
 
-static void php_yajl_generate(yajl_gen gen, zval *val)
+static void php_yajl_generate(yajl_gen gen, zval *val TSRMLS_DC)
 {
 	switch(Z_TYPE_P(val))
 	{
@@ -366,7 +367,7 @@ static void php_yajl_generate(yajl_gen gen, zval *val)
 
 		case IS_ARRAY:
 		case IS_OBJECT:
-			php_yajl_generate_array(gen, val);
+			php_yajl_generate_array(gen, val TSRMLS_CC);
 			break;
 
 		default:
@@ -706,11 +707,11 @@ PHP_FUNCTION(yajl_generate)
 	}
 
 	gen = yajl_gen_alloc(NULL);
-    //yajl_gen_config(gen, yajl_gen_beautify, 1);
-	//yajl_gen_config(gen, yajl_gen_validate_utf8, 1);
-    //yajl_gen_config(gen, yajl_gen_escape_solidus, 1);
+    yajl_gen_config(gen, yajl_gen_beautify, 1);
+	yajl_gen_config(gen, yajl_gen_validate_utf8, 1);
+    yajl_gen_config(gen, yajl_gen_escape_solidus, 1);
 	
-	php_yajl_generate(gen, param);
+	php_yajl_generate(gen, param TSRMLS_CC);
 
 	yajl_gen_get_buf(gen, &buf, &len);
 
@@ -719,6 +720,8 @@ PHP_FUNCTION(yajl_generate)
     yajl_gen_clear(gen);
 
 	yajl_gen_free(gen);
+
+    return;
 
 }
 
