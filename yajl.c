@@ -38,6 +38,8 @@ ZEND_DECLARE_MODULE_GLOBALS(yajl)
 /* True global resources - no need for thread safety here */
 static int le_yajl;
 
+#define PHP_YAJL_VERSION "0.0.1"
+
 #define PHP_JSON_OUTPUT_ARRAY 0
 #define PHP_JSON_OUTPUT_OBJECT 1
 
@@ -63,7 +65,27 @@ struct context_s
 };
 typedef struct context_s context_t;
 
-static void php_yajl_generate(yajl_gen gen, zval *val);
+static int json_determine_array_type(zval **val TSRMLS_DC);
+static void php_yajl_generate_array(yajl_gen gen, zval *val TSRMLS_DC);
+static void php_yajl_generate(yajl_gen gen, zval *val TSRMLS_DC);
+
+static int object_add_keyval(context_t *ctx, zval *obj, zval *key, zval *value);
+static int array_add_value (context_t *ctx, zval *array, zval *value);
+static int context_push(context_t *ctx, zval *v, int type);
+static zval* context_pop(context_t *ctx);
+static int context_add_value (context_t *ctx, zval *v);
+static int handle_string (void *ctx, const unsigned char *string, size_t string_length);
+static int handle_number (void *ctx, const char *string, size_t string_length);
+static int handle_integer(void *ctx, long long int value);
+static int handle_double(void *ctx, double value);
+static int handle_start_map (void *ctx);
+static int handle_end_map (void *ctx);
+static int handle_start_array (void *ctx);
+static int handle_end_array (void *ctx);
+static int handle_boolean (void *ctx, int boolean_value);
+static int handle_null (void *ctx);
+zval* yajl_zval_parse (const char *input, char *error_buffer, size_t error_buffer_size);
+void yajl_zval_free (zval *v);
 
 PHP_FUNCTION(yajl_version);
 PHP_FUNCTION(yajl_generate);
@@ -179,8 +201,12 @@ PHP_RSHUTDOWN_FUNCTION(yajl)
  */
 PHP_MINFO_FUNCTION(yajl)
 {
+    char yajl_version[16];
+    sprintf(yajl_version, "%d.%d.%d", YAJL_MAJOR, YAJL_MINOR, YAJL_MICRO);
 	php_info_print_table_start();
 	php_info_print_table_header(2, "yajl support", "enabled");
+    php_info_print_table_row(2, "yajl version", yajl_version);
+    php_info_print_table_row(2, "php yajl version", PHP_YAJL_VERSION);
 	php_info_print_table_end();
 
 	/* Remove comments if you have entries in php.ini

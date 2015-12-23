@@ -72,36 +72,6 @@ ZEND_END_MODULE_GLOBALS(yajl)
 
 #endif	/* PHP_YAJL_H */
 
-static int json_determine_array_type(zval **val TSRMLS_DC);
-static void php_yajl_generate_array(yajl_gen gen, zval *val TSRMLS_DC);
-static void php_yajl_generate(yajl_gen gen, zval *val TSRMLS_DC);
-
-static int object_add_keyval(context_t *ctx, zval *obj, zval *key, zval *value);
-static int array_add_value (context_t *ctx,
-                            zval *array, zval *value);
-static int context_push(context_t *ctx, zval *v, int type);
-static zval* context_pop(context_t *ctx);
-static int context_add_value (context_t *ctx, zval *v);
-static int handle_string (void *ctx,
-                          const unsigned char *string, size_t string_length);
-static int handle_number (void *ctx, const char *string, size_t string_length);
-static int handle_integer(void *ctx, long long int value);
-static int handle_double(void *ctx, double value);
-static int handle_start_map (void *ctx);
-static int handle_end_map (void *ctx);
-static int handle_start_array (void *ctx);
-static int handle_end_array (void *ctx);
-static int handle_boolean (void *ctx, int boolean_value);
-static int handle_null (void *ctx);
-zval* yajl_zval_parse (const char *input,
-                          char *error_buffer, size_t error_buffer_size);
-void yajl_zval_free (zval *v);
-
-PHP_FUNCTION(yajl_version);
-PHP_FUNCTION(yajl_generate);
-PHP_FUNCTION(yajl_parse);
-
-
 /*
  * Local variables:
  * tab-width: 4
