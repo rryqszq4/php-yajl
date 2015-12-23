@@ -65,6 +65,18 @@ struct context_s
 };
 typedef struct context_s context_t;
 
+typedef struct _php_yajl_t {
+
+    yajl_gen gen;
+
+    yajl_handle handle;
+    yajl_status status;
+    context_t ctx;    
+
+} php_yajl_t;
+
+static zend_class_entry *php_yajl_class_entry;
+
 static int json_determine_array_type(zval **val TSRMLS_DC);
 static void php_yajl_generate_array(yajl_gen gen, zval *val TSRMLS_DC);
 static void php_yajl_generate(yajl_gen gen, zval *val TSRMLS_DC);
@@ -87,9 +99,15 @@ static int handle_null (void *ctx);
 zval* yajl_zval_parse (const char *input, char *error_buffer, size_t error_buffer_size);
 void yajl_zval_free (zval *v);
 
+static void php_yajl_rsrc_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC);
+
 PHP_FUNCTION(yajl_version);
 PHP_FUNCTION(yajl_generate);
 PHP_FUNCTION(yajl_parse);
+
+PHP_METHOD(yajl, __construct);
+PHP_METHOD(yajl, generate);
+PHP_METHOD(yajl, parse);
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_yajl_generate, 0, 0, 1)
 	ZEND_ARG_INFO(0, value)
@@ -111,6 +129,21 @@ const zend_function_entry yajl_functions[] = {
 	PHP_FE_END	/* Must be the last line in yajl_functions[] */
 };
 /* }}} */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_yajl_construct, 0, 0, 0)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_yajl_generate, 0, 0, 1)
+    ZEND_ARG_INFO(0, value)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_yajl_parse, 0, 0, 1)
+    ZEND_ARG_INFO(0, str)
+ZEND_END_ARG_INFO()
+
+static const zend_function_entry php_yajl_class_functions[] = {
+    PHP_ME(yajl, __construct, arginfo_php_yajl_construct, ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
+    PHP_ME(yajl, generate,    arginfo_php_yajl_generate,  ZEND_ACC_STATIC | ZEND_ACC_PUBLIC)
+    PHP_ME(yajl, parse,       arginfo_php_yajl_parse,     ZEND_ACC_STATIC | ZEND_ACC_PUBLIC)
+};
 
 /* {{{ yajl_module_entry
  */
@@ -164,6 +197,15 @@ PHP_MINIT_FUNCTION(yajl)
 	/* If you have INI entries, uncomment these lines 
 	REGISTER_INI_ENTRIES();
 	*/
+
+    le_yajl = zend_register_list_destructors_ex(php_yajl_rsrc_dtor, NULL, "php yajl", module_number);
+
+    zend_class_entry yajl_class_entry;
+    INIT_CLASS_ENTRY(yajl_class_entry, "yajl", php_yajl_class_functions);
+    php_yajl_class_entry = zend_register_internal_class(&yajl_class_entry TSRMLS_CC);
+
+    zend_declare_property_null(php_yajl_class_entry, "instance", sizeof("instance")-1, ZEND_ACC_STATIC | ZEND_ACC_PUBLIC TSRMLS_CC);
+
 	return SUCCESS;
 }
 /* }}} */
@@ -719,6 +761,10 @@ void yajl_zval_free (zval *v)
     zval_ptr_dtor(&v);
 }
 
+static void php_yajl_rsrc_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
+{
+    php_yajl_t *yajl = (php_yajl_t *)rsrc->ptr;
+}
 
 PHP_FUNCTION(yajl_generate)
 {
@@ -769,6 +815,56 @@ PHP_FUNCTION(yajl_parse)
 	RETVAL_ZVAL(node, 1, 0);
 
 	yajl_zval_free(node);
+}
+
+PHP_METHOD(yajl, __construct)
+{
+    php_yajl_t *yajl;
+    zval *object;
+
+    static const yajl_callbacks callbacks =
+        {
+            /* null        = */ handle_null,
+            /* boolean     = */ handle_boolean,
+            /* integer     = */ handle_integer,
+            /* double      = */ handle_double,
+            /* number      = */ NULL,//handle_number,
+            /* string      = */ handle_string,
+            /* start map   = */ handle_start_map,
+            /* map key     = */ handle_string,
+            /* end map     = */ handle_end_map,
+            /* start array = */ handle_start_array,
+            /* end array   = */ handle_end_array
+        };
+
+    yajl = ecalloc(1, sizeof(yajl));
+
+    yajl->gen = yajl_gen_alloc(NULL);
+    yajl_gen_config(yajl->gen, yajl_gen_beautify, 1);
+    yajl_gen_config(yajl->gen, yajl_gen_validate_utf8, 1);
+    yajl_gen_config(yajl->gen, yajl_gen_escape_solidus, 1);
+
+    yajl->handle = yajl_alloc (&callbacks, NULL, &(yajl->ctx));
+    yajl_config(yajl->handle, yajl_allow_comments, 1);
+
+    yajl->ctx.stack = NULL;
+    yajl->ctx.root = NULL;
+    yajl->ctx.errbuf = NULL;
+    yajl->ctx.errbuf_size = 0;
+
+    ZEND_REGISTER_RESOURCE(return_value, yajl, le_yajl);
+
+    return ;
+}
+
+PHP_METHOD(yajl, generate)
+{
+
+}
+
+PHP_METHOD(yajl, parse)
+{
+
 }
 
 
