@@ -73,6 +73,10 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_yajl_generate, 0, 0, 1)
 	ZEND_ARG_INFO(0, value)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_yajl_parse, 0, 0, 1)
+    ZEND_ARG_INFO(0, str)
+ZEND_END_ARG_INFO()
+
 /* {{{ yajl_functions[]
  *
  * Every user visible function must have an entry in yajl_functions[].
@@ -81,7 +85,7 @@ const zend_function_entry yajl_functions[] = {
 	PHP_FE(confirm_yajl_compiled,	NULL)		/* For testing, remove later. */
 	PHP_FE(yajl_version, NULL)
 	PHP_FE(yajl_generate, arginfo_yajl_generate)
-	PHP_FE(yajl_parse, NULL)
+	PHP_FE(yajl_parse, arginfo_yajl_parse)
 	PHP_FE_END	/* Must be the last line in yajl_functions[] */
 };
 /* }}} */
@@ -522,6 +526,26 @@ static int handle_number (void *ctx, const char *string, size_t string_length)
     return ((context_add_value(ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
 }
 
+static int handle_integer(void *ctx, long long int value)
+{
+    zval *v;
+    ALLOC_INIT_ZVAL(v);
+
+    ZVAL_LONG(v, value);
+
+    return ((context_add_value(ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
+static int handle_double(void *ctx, double value)
+{
+    zval *v;
+    ALLOC_INIT_ZVAL(v);
+
+    ZVAL_DOUBLE(v, value);
+
+    return ((context_add_value(ctx, v) == 0) ? STATUS_CONTINUE : STATUS_ABORT);
+}
+
 static int handle_start_map (void *ctx)
 {
     int type = 0;
@@ -594,9 +618,9 @@ zval* yajl_zval_parse (const char *input,
         {
             /* null        = */ handle_null,
             /* boolean     = */ handle_boolean,
-            /* integer     = */ NULL,
-            /* double      = */ NULL,
-            /* number      = */ handle_number,
+            /* integer     = */ handle_integer,
+            /* double      = */ handle_double,
+            /* number      = */ NULL,//handle_number,
             /* string      = */ handle_string,
             /* start map   = */ handle_start_map,
             /* map key     = */ handle_string,
@@ -681,17 +705,19 @@ PHP_FUNCTION(yajl_generate)
 	}
 
 	gen = yajl_gen_alloc(NULL);
-	yajl_gen_config(gen, yajl_gen_beautify, 1);
+    //yajl_gen_config(gen, yajl_gen_beautify, 1);
+	//yajl_gen_config(gen, yajl_gen_validate_utf8, 1);
+    //yajl_gen_config(gen, yajl_gen_escape_solidus, 1);
 	
 	php_yajl_generate(gen, param);
 
-	yajl_gen_get_buf(gen, &buf.c, &buf.len);
+	yajl_gen_get_buf(gen, (const unsigned char **)&buf.c, &buf.len);
 
 	ZVAL_STRINGL(return_value, buf.c, buf.len, 1);
 
+    smart_str_free(&buf);
+    
 	yajl_gen_free(gen);
-
-	smart_str_free(&buf);
 
 }
 
