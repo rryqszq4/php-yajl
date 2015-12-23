@@ -25,7 +25,7 @@
 #include "php.h"
 #include "php_ini.h"
 #include "ext/standard/info.h"
-#include "ext/standard/php_smart_str.h"
+  
 #include "php_yajl.h"
 #include "yajl/api/yajl_version.h"
 #include "yajl/api/yajl_gen.h"
@@ -696,8 +696,9 @@ void yajl_zval_free (zval *v)
 PHP_FUNCTION(yajl_generate)
 {
 	zval *param;
-	smart_str buf = {0};
 	yajl_gen gen;
+    const unsigned char * buf;
+    size_t len;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &param) == FAILURE)
 	{
@@ -711,12 +712,12 @@ PHP_FUNCTION(yajl_generate)
 	
 	php_yajl_generate(gen, param);
 
-	yajl_gen_get_buf(gen, (const unsigned char **)&buf.c, &buf.len);
+	yajl_gen_get_buf(gen, &buf, &len);
 
-	ZVAL_STRINGL(return_value, buf.c, buf.len, 1);
+	ZVAL_STRINGL(return_value, buf, len, 1);
 
-    smart_str_free(&buf);
-    
+    yajl_gen_clear(gen);
+
 	yajl_gen_free(gen);
 
 }
