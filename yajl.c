@@ -903,7 +903,7 @@ PHP_METHOD(yajl, generate)
 
 	}else {
 		instance = php_yajl_new();
-		//zend_update_static_property(php_yajl_class_entry, "instance", sizeof("instance")-1, instance TSRMLS_CC);
+		zend_update_static_property(php_yajl_class_entry, "instance", sizeof("instance")-1, instance TSRMLS_CC);
 	}
 
 	ZEND_FETCH_RESOURCE(yajl, php_yajl_t *, &instance, -1, "php yajl", le_yajl);
