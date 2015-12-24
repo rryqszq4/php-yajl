@@ -585,7 +585,7 @@ static int handle_string (void *ctx,
                           const unsigned char *string, size_t string_length)
 {
     zval *v;
-    ALLOC_INIT_ZVAL(v);
+    MAKE_STD_ZVAL(v);
 
     ZVAL_STRINGL(v, string, string_length, 1);
 
@@ -595,7 +595,7 @@ static int handle_string (void *ctx,
 static int handle_number (void *ctx, const char *string, size_t string_length)
 {
     zval *v;
-    ALLOC_INIT_ZVAL(v);
+    MAKE_STD_ZVAL(v);
 
     ZVAL_STRINGL(v, string, string_length, 1);
 
@@ -605,7 +605,7 @@ static int handle_number (void *ctx, const char *string, size_t string_length)
 static int handle_integer(void *ctx, long long int value)
 {
     zval *v;
-    ALLOC_INIT_ZVAL(v);
+    MAKE_STD_ZVAL(v);
 
     ZVAL_LONG(v, value);
 
@@ -615,7 +615,7 @@ static int handle_integer(void *ctx, long long int value)
 static int handle_double(void *ctx, double value)
 {
     zval *v;
-    ALLOC_INIT_ZVAL(v);
+    MAKE_STD_ZVAL(v);
 
     ZVAL_DOUBLE(v, value);
 
@@ -626,7 +626,7 @@ static int handle_start_map (void *ctx)
 {
     int type = 0;
     zval *v;
-    ALLOC_INIT_ZVAL(v);
+    MAKE_STD_ZVAL(v);
 
     array_init(v);
 
@@ -648,7 +648,7 @@ static int handle_start_array (void *ctx)
 {
     int type = 1;
     zval *v;
-    ALLOC_INIT_ZVAL(v);
+    MAKE_STD_ZVAL(v);
 
     array_init(v);
 
@@ -669,7 +669,7 @@ static int handle_end_array (void *ctx)
 static int handle_boolean (void *ctx, int boolean_value)
 {
     zval *v;
-    ALLOC_INIT_ZVAL(v);
+    MAKE_STD_ZVAL(v);
 
     ZVAL_BOOL(v, boolean_value);
 
@@ -679,7 +679,7 @@ static int handle_boolean (void *ctx, int boolean_value)
 static int handle_null (void *ctx)
 {
     zval *v;
-    ALLOC_INIT_ZVAL(v);
+    MAKE_STD_ZVAL(v);
 
     ZVAL_NULL(v);
 
@@ -772,20 +772,30 @@ static void php_yajl_rsrc_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
 {
     php_yajl_t *yajl = (php_yajl_t *)rsrc->ptr;
 
-    yajl_gen_clear(yajl->gen);
-    yajl_gen_free(yajl->gen);
+    if (yajl->gen){
+    	yajl_gen_clear(yajl->gen);
+    	yajl_gen_free(yajl->gen);
+	}
 
-    efree(yajl->ctx);
+	if (yajl->ctx){
+    	efree(yajl->ctx);
+	}
 
-    yajl_free(yajl->handle);
+	if (yajl->handle){
+    	yajl_free(yajl->handle);
+	}
 
-    efree(yajl);
+	if (yajl){
+    	efree(yajl);
+	}
 }
 
 static zval* php_yajl_new()
 {
+	TSRMLS_FETCH();
+
 	php_yajl_t *yajl;
-    zval *return_value;
+    zval *return_value = NULL;
     char errbuf[1024];
 
     static const yajl_callbacks callbacks =
@@ -803,7 +813,7 @@ static zval* php_yajl_new()
             /* end array   = */ handle_end_array
         };
 
-    yajl = ecalloc(1, sizeof(yajl));
+    yajl = emalloc(sizeof(php_yajl_t));
 
     yajl->gen = yajl_gen_alloc(NULL);
     yajl_gen_config(yajl->gen, yajl_gen_beautify, 1);
@@ -811,7 +821,7 @@ static zval* php_yajl_new()
     yajl_gen_config(yajl->gen, yajl_gen_escape_solidus, 1);
 
     
-	yajl->ctx = ecalloc(1, sizeof(context_t *));
+	yajl->ctx = emalloc(sizeof(context_t));
 
     yajl->handle = yajl_alloc (&callbacks, NULL, yajl->ctx);
     yajl_config(yajl->handle, yajl_allow_comments, 1);
@@ -893,11 +903,11 @@ PHP_METHOD(yajl, generate)
 
 	}else {
 		instance = php_yajl_new();
-		zend_update_static_property(php_yajl_class_entry, "instance", sizeof("instance")-1, instance TSRMLS_CC);
+		//zend_update_static_property(php_yajl_class_entry, "instance", sizeof("instance")-1, instance TSRMLS_CC);
 	}
 
 	ZEND_FETCH_RESOURCE(yajl, php_yajl_t *, &instance, -1, "php yajl", le_yajl);
-	
+
 	php_yajl_generate(yajl->gen, param TSRMLS_CC);
 
 	yajl_gen_get_buf(yajl->gen, &buf, &len);
@@ -943,9 +953,10 @@ PHP_METHOD(yajl, parse)
 
 	RETVAL_ZVAL(yajl->ctx->root, 1, 0);
 
-	yajl_bs_free((yajl->handle)->stateStack);
-	yajl_bs_init((yajl->handle)->stateStack, &((yajl->handle)->alloc));
-    yajl_bs_push((yajl->handle)->stateStack, 0);
+	yajl_bs_free(yajl->handle->stateStack);
+    yajl_bs_init(yajl->handle->stateStack, &(yajl->handle->alloc));
+    yajl_bs_push(yajl->handle->stateStack, 0);
+    //yajl_bs_set((yajl->handle)->stateStack, 0);
 
     zval_ptr_dtor(&yajl->ctx->root);
 	return ;
