@@ -30,6 +30,7 @@
 #include "yajl/api/yajl_version.h"
 #include "yajl/api/yajl_gen.h"
 #include "yajl/api/yajl_parse.h"
+#include "yajl/yajl_parser.h"
 
 /* If you declare any globals in php_yajl.h uncomment this:
 ZEND_DECLARE_MODULE_GLOBALS(yajl)
@@ -45,6 +46,12 @@ static int le_yajl;
 
 #define STATUS_CONTINUE 1
 #define STATUS_ABORT    0
+
+#define RETURN_ERROR(ctx,retval,...) {                                  \
+        if ((ctx)->errbuf != NULL)                                      \
+            snprintf ((ctx)->errbuf, (ctx)->errbuf_size, __VA_ARGS__);  \
+        return (retval);                                                \
+    }
 
 struct stack_elem_s;
 typedef struct stack_elem_s stack_elem_t;
@@ -71,11 +78,11 @@ typedef struct _php_yajl_t {
 
     yajl_handle handle;
     yajl_status status;
-    context_t ctx;    
+    context_t *ctx;    
 
 } php_yajl_t;
 
-static zend_class_entry *php_yajl_class_entry;
+zend_class_entry * php_yajl_class_entry;
 
 static int json_determine_array_type(zval **val TSRMLS_DC);
 static void php_yajl_generate_array(yajl_gen gen, zval *val TSRMLS_DC);
@@ -105,7 +112,6 @@ PHP_FUNCTION(yajl_version);
 PHP_FUNCTION(yajl_generate);
 PHP_FUNCTION(yajl_parse);
 
-PHP_METHOD(yajl, __construct);
 PHP_METHOD(yajl, generate);
 PHP_METHOD(yajl, parse);
 
@@ -139,10 +145,11 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_php_yajl_parse, 0, 0, 1)
     ZEND_ARG_INFO(0, str)
 ZEND_END_ARG_INFO()
 
-static const zend_function_entry php_yajl_class_functions[] = {
-    PHP_ME(yajl, __construct, arginfo_php_yajl_construct, ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
-    PHP_ME(yajl, generate,    arginfo_php_yajl_generate,  ZEND_ACC_STATIC | ZEND_ACC_PUBLIC)
-    PHP_ME(yajl, parse,       arginfo_php_yajl_parse,     ZEND_ACC_STATIC | ZEND_ACC_PUBLIC)
+zend_function_entry php_yajl_class_functions[] = {
+    //PHP_ME(yajl, __construct, arginfo_php_yajl_construct, ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
+    PHP_ME(yajl, generate,    arginfo_php_yajl_generate,  ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(yajl, parse,       arginfo_php_yajl_parse,     ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    {NULL, NULL, NULL}
 };
 
 /* {{{ yajl_module_entry
@@ -204,7 +211,7 @@ PHP_MINIT_FUNCTION(yajl)
     INIT_CLASS_ENTRY(yajl_class_entry, "yajl", php_yajl_class_functions);
     php_yajl_class_entry = zend_register_internal_class(&yajl_class_entry TSRMLS_CC);
 
-    zend_declare_property_null(php_yajl_class_entry, "instance", sizeof("instance")-1, ZEND_ACC_STATIC | ZEND_ACC_PUBLIC TSRMLS_CC);
+    zend_declare_property_null(php_yajl_class_entry, "instance", sizeof("instance")-1, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC TSRMLS_CC);
 
 	return SUCCESS;
 }
@@ -764,6 +771,55 @@ void yajl_zval_free (zval *v)
 static void php_yajl_rsrc_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
 {
     php_yajl_t *yajl = (php_yajl_t *)rsrc->ptr;
+
+    yajl_gen_clear(yajl->gen);
+    yajl_gen_free(yajl->gen);
+
+    efree(yajl->ctx);
+
+    yajl_free(yajl->handle);
+
+    efree(yajl);
+}
+
+static zval* php_yajl_new()
+{
+	php_yajl_t *yajl;
+    zval *return_value;
+    char errbuf[1024];
+
+    static const yajl_callbacks callbacks =
+        {
+            /* null        = */ handle_null,
+            /* boolean     = */ handle_boolean,
+            /* integer     = */ handle_integer,
+            /* double      = */ handle_double,
+            /* number      = */ NULL,//handle_number,
+            /* string      = */ handle_string,
+            /* start map   = */ handle_start_map,
+            /* map key     = */ handle_string,
+            /* end map     = */ handle_end_map,
+            /* start array = */ handle_start_array,
+            /* end array   = */ handle_end_array
+        };
+
+    yajl = ecalloc(1, sizeof(yajl));
+
+    yajl->gen = yajl_gen_alloc(NULL);
+    yajl_gen_config(yajl->gen, yajl_gen_beautify, 1);
+    yajl_gen_config(yajl->gen, yajl_gen_validate_utf8, 1);
+    yajl_gen_config(yajl->gen, yajl_gen_escape_solidus, 1);
+
+    
+	yajl->ctx = ecalloc(1, sizeof(context_t *));
+
+    yajl->handle = yajl_alloc (&callbacks, NULL, yajl->ctx);
+    yajl_config(yajl->handle, yajl_allow_comments, 1);
+
+    MAKE_STD_ZVAL(return_value);
+    ZEND_REGISTER_RESOURCE(return_value, yajl, le_yajl);
+
+    return return_value;
 }
 
 PHP_FUNCTION(yajl_generate)
@@ -817,53 +873,82 @@ PHP_FUNCTION(yajl_parse)
 	yajl_zval_free(node);
 }
 
-PHP_METHOD(yajl, __construct)
-{
-    php_yajl_t *yajl;
-    zval *object;
-
-    static const yajl_callbacks callbacks =
-        {
-            /* null        = */ handle_null,
-            /* boolean     = */ handle_boolean,
-            /* integer     = */ handle_integer,
-            /* double      = */ handle_double,
-            /* number      = */ NULL,//handle_number,
-            /* string      = */ handle_string,
-            /* start map   = */ handle_start_map,
-            /* map key     = */ handle_string,
-            /* end map     = */ handle_end_map,
-            /* start array = */ handle_start_array,
-            /* end array   = */ handle_end_array
-        };
-
-    yajl = ecalloc(1, sizeof(yajl));
-
-    yajl->gen = yajl_gen_alloc(NULL);
-    yajl_gen_config(yajl->gen, yajl_gen_beautify, 1);
-    yajl_gen_config(yajl->gen, yajl_gen_validate_utf8, 1);
-    yajl_gen_config(yajl->gen, yajl_gen_escape_solidus, 1);
-
-    yajl->handle = yajl_alloc (&callbacks, NULL, &(yajl->ctx));
-    yajl_config(yajl->handle, yajl_allow_comments, 1);
-
-    yajl->ctx.stack = NULL;
-    yajl->ctx.root = NULL;
-    yajl->ctx.errbuf = NULL;
-    yajl->ctx.errbuf_size = 0;
-
-    ZEND_REGISTER_RESOURCE(return_value, yajl, le_yajl);
-
-    return ;
-}
 
 PHP_METHOD(yajl, generate)
 {
+	zval *instance;
+	php_yajl_t *yajl;
+
+	zval *param;
+    const unsigned char * buf;
+    size_t len;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &param) == FAILURE)
+	{
+		return ;
+	}
+
+	instance = zend_read_static_property(php_yajl_class_entry, "instance", sizeof("instance")-1 , 1 TSRMLS_CC);
+	if (Z_TYPE_P(instance) == IS_RESOURCE){
+
+	}else {
+		instance = php_yajl_new();
+		zend_update_static_property(php_yajl_class_entry, "instance", sizeof("instance")-1, instance TSRMLS_CC);
+	}
+
+	ZEND_FETCH_RESOURCE(yajl, php_yajl_t *, &instance, -1, "php yajl", le_yajl);
+	
+	php_yajl_generate(yajl->gen, param TSRMLS_CC);
+
+	yajl_gen_get_buf(yajl->gen, &buf, &len);
+
+	ZVAL_STRINGL(return_value, buf, len, 1);
+
+    return;
 
 }
 
 PHP_METHOD(yajl, parse)
 {
+	zval *instance;
+	php_yajl_t *yajl;
+
+	char *str;
+	int str_len;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &str, &str_len) == FAILURE)
+	{
+		return ;
+	}
+
+	instance = zend_read_static_property(php_yajl_class_entry, "instance", sizeof("instance")-1 , 1 TSRMLS_CC);
+	if (Z_TYPE_P(instance) == IS_RESOURCE){
+
+	}else {
+		instance = php_yajl_new();
+		zend_update_static_property(php_yajl_class_entry, "instance", sizeof("instance")-1, instance TSRMLS_CC);
+	}
+
+	ZEND_FETCH_RESOURCE(yajl, php_yajl_t *, &instance, -1, "php yajl", le_yajl);
+
+	yajl->status = yajl_parse(yajl->handle,
+                        (unsigned char *) str,
+                        (size_t) str_len);
+
+    yajl->status = yajl_complete_parse (yajl->handle);
+    
+    if (yajl->status != yajl_status_ok) {
+        return ;
+    }
+
+	RETVAL_ZVAL(yajl->ctx->root, 1, 0);
+
+	yajl_bs_free((yajl->handle)->stateStack);
+	yajl_bs_init((yajl->handle)->stateStack, &((yajl->handle)->alloc));
+    yajl_bs_push((yajl->handle)->stateStack, 0);
+
+    zval_ptr_dtor(&yajl->ctx->root);
+	return ;
 
 }
 
