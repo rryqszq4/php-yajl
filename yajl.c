@@ -386,7 +386,7 @@ static void php_yajl_generate_array(yajl_gen gen, zval *val TSRMLS_DC)
 				}
 
 				if (r == PHP_JSON_OUTPUT_ARRAY){
-					php_yajl_generate(gen, *data);
+					php_yajl_generate(gen, *data TSRMLS_CC);
 				}else if (r == PHP_JSON_OUTPUT_OBJECT){
 					if (i == HASH_KEY_IS_STRING){
 						yajl_gen_string(gen, key, key_len-1);
@@ -394,7 +394,7 @@ static void php_yajl_generate_array(yajl_gen gen, zval *val TSRMLS_DC)
 						sprintf(key_index, "%d", index);
 						yajl_gen_string(gen, key_index, strlen(key_index));
 					}
-					php_yajl_generate(gen, *data);
+					php_yajl_generate(gen, *data TSRMLS_CC);
 				}
 
 				if (tmp_ht) {
