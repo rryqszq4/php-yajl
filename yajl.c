@@ -494,7 +494,7 @@ static int context_push(context_t *ctx, zval *v, int type)
 {
     stack_elem_t *stack;
 
-    stack = malloc (sizeof (*stack));
+    stack = emalloc (sizeof (*stack));
     if (stack == NULL)
         RETURN_ERROR (ctx, ENOMEM, "Out of memory");
     memset (stack, 0, sizeof (*stack));
@@ -526,7 +526,7 @@ static zval* context_pop(context_t *ctx)
 
     v = stack->value;
 
-    free (stack);
+    efree (stack);
 
     return (v);
 }
@@ -821,7 +821,7 @@ static zval* php_yajl_new()
     yajl_gen_config(yajl->gen, yajl_gen_escape_solidus, 1);
 
     
-	yajl->ctx = emalloc(sizeof(context_t));
+	yajl->ctx = ecalloc(1, sizeof(context_t *));
 
     yajl->handle = yajl_alloc (&callbacks, NULL, yajl->ctx);
     yajl_config(yajl->handle, yajl_allow_comments, 1);
