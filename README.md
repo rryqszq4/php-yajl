@@ -30,12 +30,33 @@ var_dump(yajl_generate($arr));
 string(28) "[1,"string",{"key":"value"}]";
 */
 
+var_dump(yajl::generate($arr));
+
+/* ==>output
+string(28) "[1,"string",{"key":"value"}]";
+*/
+
 ```
 
 **parsing**
 ```php
 $str = '[1,"string",{"key":"value"}]';
 var_dump(yajl_parse($str));
+
+/* ==>output
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  string(6) "string"
+  [2]=>
+  array(1) {
+    ["key"]=>
+    string(5) "value"
+  }
+}
+
+var_dump(yajl::parse($str));
 
 /* ==>output
 array(3) {
