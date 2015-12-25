@@ -55,6 +55,7 @@ array(3) {
     string(5) "value"
   }
 }
+*/
 
 var_dump(yajl::parse($str));
 
