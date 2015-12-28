@@ -19,6 +19,7 @@ Example
 -------
 **generation**
 ```php
+<?php
 
 $arr = array(
 	1,
@@ -37,10 +38,13 @@ var_dump(yajl::generate($arr));
 string(28) "[1,"string",{"key":"value"}]";
 */
 
+?>
 ```
 
 **parsing**
 ```php
+<?php
+
 $str = '[1,"string",{"key":"value"}]';
 var_dump(yajl_parse($str));
 
@@ -73,4 +77,6 @@ array(3) {
   }
 }
 */
+
+?>
 ```
