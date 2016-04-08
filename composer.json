@@ -1,0 +1,14 @@
+{
+	"name": "rryqszq4/php-yajl",
+	"description": "A fast JSON parsing/generation library YAJL in PHP extension",
+	"authors": [
+		{
+			"name": "rryqszq4",
+			"email": "memwared@gmail.com"
+		}
+	],
+	"require": {
+        "php": "5.3 ~ 5.6"
+    },
+    "version": "0.0.1"
+}
