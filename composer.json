@@ -1,6 +1,7 @@
 {
 	"name": "rryqszq4/php-yajl",
 	"description": "A fast JSON parsing/generation library YAJL in PHP extension",
+	"license": "PHP license 3.01",
 	"authors": [
 		{
 			"name": "rryqszq4",
