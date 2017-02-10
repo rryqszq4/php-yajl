@@ -1,6 +1,6 @@
 php-yajl
 ========
-[![Build Status](https://travis-ci.org/rryqszq4/php-ext-yajl.svg?branch=master)](https://travis-ci.org/rryqszq4/php-ext-yajl)
+[![Build Status](https://travis-ci.org/rryqszq4/php-yajl.svg?branch=master)](https://travis-ci.org/rryqszq4/php-yajl)
 
 The php-yajl is a simple fast JSON parsing and generation library YAJL(Yet Another JSON Library), Bindings for php extension.
 
